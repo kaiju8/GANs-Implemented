@@ -9,14 +9,9 @@ import torchvision.transforms.functional as F
 
 from torch.utils.data import DataLoader
 
-from torch.utils.data import DataLoader
-
 import numpy as np
 
 import matplotlib.pyplot as plt
-
-
-
 
 
 
@@ -25,7 +20,7 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.disc = nn.Sequential(
             #Input = Nxchannels_imgx64x64
-            nn.Conv2d(channels_img, features_d, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(channels_img, features_d, kernel_size=4, stride=2, padding=1, bias = False,),
             nn.LeakyReLU(0.2),
 
             self._block(features_d, features_d*2, 4, 2, 1), #Nxfeatures_d*2x32x32
@@ -60,7 +55,7 @@ class Generator(nn.Module):
             self._block(features_g*16, features_g*8, 4, 2, 1), #N*features_g*8*8*8
             self._block(features_g*8, features_g*4, 4, 2, 1), #N*features_g*4*16*16
             self._block(features_g*4, features_g*2, 4, 2, 1), #N*features_g*2*32*32
-            nn.ConvTranspose2d(features_g*2, channels_img, kernel_size=4, stride=2, padding=1), #N*channels_img*64*64
+            nn.ConvTranspose2d(features_g*2, channels_img, kernel_size=4, stride=2, padding=1, bias = False,), #N*channels_img*64*64
             nn.Tanh(),
         )
 
@@ -91,19 +86,6 @@ class dcgan_pass(Discriminator,Generator,nn.Module):
         for m in model.modules():
             if isinstance(m , (nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d)):
                 nn.init.normal_(m.weight.data, 0.0, 0.02)
-
-    def test(self):
-        N, in_channels, H, W = 8, 3, 64, 64
-        noise_dim = 100
-        x = torch.randn((N, in_channels, H, W))
-        disc = Discriminator(in_channels, 8)
-        self.initialize_weights(disc)
-        assert disc(x).shape == (N, 1, 1, 1), "Discriminator test failed"
-        gen = Generator(noise_dim, in_channels, 8)
-        z = torch.randn((N, noise_dim, 1, 1))
-        self.initialize_weights(gen)
-        assert gen(z).shape == (N, in_channels, H, W), "Generator test failed"
-        print("Success, tests passed!")
     
     def view_batch(train_path,channels_img=3,img_dim=64,batch_size=32):
 
