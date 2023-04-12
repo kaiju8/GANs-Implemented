@@ -9,9 +9,14 @@ import torchvision.transforms.functional as F
 
 from torch.utils.data import DataLoader
 
+from torch.utils.data import DataLoader
+
 import numpy as np
 
 import matplotlib.pyplot as plt
+
+
+
 
 
 
@@ -20,7 +25,7 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.disc = nn.Sequential(
             #Input = Nxchannels_imgx64x64
-            nn.Conv2d(channels_img, features_d, kernel_size=4, stride=2, padding=1, bias = False,),
+            nn.Conv2d(channels_img, features_d, kernel_size=4, stride=2, padding=1),
             nn.LeakyReLU(0.2),
 
             self._block(features_d, features_d*2, 4, 2, 1), #Nxfeatures_d*2x32x32
@@ -55,7 +60,7 @@ class Generator(nn.Module):
             self._block(features_g*16, features_g*8, 4, 2, 1), #N*features_g*8*8*8
             self._block(features_g*8, features_g*4, 4, 2, 1), #N*features_g*4*16*16
             self._block(features_g*4, features_g*2, 4, 2, 1), #N*features_g*2*32*32
-            nn.ConvTranspose2d(features_g*2, channels_img, kernel_size=4, stride=2, padding=1, bias = False,), #N*channels_img*64*64
+            nn.ConvTranspose2d(features_g*2, channels_img, kernel_size=4, stride=2, padding=1), #N*channels_img*64*64
             nn.Tanh(),
         )
 
@@ -75,7 +80,7 @@ class dcgan_pass(Discriminator,Generator,nn.Module):
             self.lr = 2e-4, 
             self.z_dim = 100, 
             self.img_dim = 64,
-            self.channels_img = 3,
+            self.channels_img =3,
             self.batch_size = 128,
             self.num_epochs = 5,
             self.features_d = 64,
@@ -86,6 +91,19 @@ class dcgan_pass(Discriminator,Generator,nn.Module):
         for m in model.modules():
             if isinstance(m , (nn.Conv2d, nn.ConvTranspose2d, nn.BatchNorm2d)):
                 nn.init.normal_(m.weight.data, 0.0, 0.02)
+
+    def test(self):
+        N, in_channels, H, W = 8, 3, 64, 64
+        noise_dim = 100
+        x = torch.randn((N, in_channels, H, W))
+        disc = Discriminator(in_channels, 8)
+        self.initialize_weights(disc)
+        assert disc(x).shape == (N, 1, 1, 1), "Discriminator test failed"
+        gen = Generator(noise_dim, in_channels, 8)
+        z = torch.randn((N, noise_dim, 1, 1))
+        self.initialize_weights(gen)
+        assert gen(z).shape == (N, in_channels, H, W), "Generator test failed"
+        print("Success, tests passed!")
     
     def view_batch(train_path,channels_img=3,img_dim=64,batch_size=32):
 
@@ -121,6 +139,7 @@ class dcgan_pass(Discriminator,Generator,nn.Module):
             num_epochs = 5,
             features_d = 64,
             features_g = 64,
+            optimizer=None
 
     ):
         transformer = transforms.Compose(
@@ -142,8 +161,15 @@ class dcgan_pass(Discriminator,Generator,nn.Module):
         self.initialize_weights(disc)
         self.initialize_weights(gen)
 
-        opt_disc = optim.Adam(disc.parameters(), lr = lr, betas=(0.5,0.999))
-        opt_gen = optim.Adam(gen.parameters(), lr = lr, betas=(0.5,0.999))
+        if optimizer is None:
+          opt_disc = optim.Adam(disc.parameters(), lr = lr, betas=(0.5,0.999))
+          opt_gen = optim.Adam(gen.parameters(), lr = lr, betas=(0.5,0.999))
+        if optimizer is 'SGD':
+          opt_disc = optim.SGD(disc.parameters(), lr = lr,momentum=0.9)
+          opt_gen = optim.SGD(gen.parameters(), lr = lr, momentum=0.9)
+        if optimizer is 'RMSprop':
+          opt_disc = optim.RMSprop(disc.parameters(), lr = lr, momentum=0.95, alpha=0.95)
+          opt_gen = optim.RMSprop(gen.parameters(), lr = lr, momentum=0.95,alpha=0.95)
         criterion = nn.BCELoss()
         fixed_noise = torch.randn((32, z_dim, 1, 1)).to(device)
 
@@ -200,7 +226,9 @@ class dcgan_pass(Discriminator,Generator,nn.Module):
                         print(f"Epoch [{epoch}/{num_epochs}] Batch {batch_idx}/{len(loader)} \Loss D: {loss_D:.4f}, loss G: {loss_G:.4f}")
                         train_loss.append([loss_G,loss_D])
                         with torch.no_grad():
-                            fake = gen(fixed_noise).reshape(-1, 1, 64, 64)
+                            n_channels=self.channels_img
+                            dim_img=self.img_dim
+                            fake = gen(fixed_noise).view(-1,channels_img,features_d,features_g)
                             img_grid_fake = torchvision.utils.make_grid(fake, normalize=True)
                             show(img_grid_fake)
             ####################################################
@@ -217,7 +245,7 @@ class dcgan_pass(Discriminator,Generator,nn.Module):
                 img = F.to_pil_image(img)
                 axs[0, i].imshow(np.asarray(img))
                 axs[0, i].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
-        fake = generator(fixed_noise).reshape(-1, 1, 64, 64)
+        fake = generator(fixed_noise).reshape(-1, 3, 64, 64)
         img_grid_fake = torchvision.utils.make_grid(fake, normalize=True)
         show(img_grid_fake)
         
