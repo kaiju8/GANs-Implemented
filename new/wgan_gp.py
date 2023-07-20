@@ -1,5 +1,5 @@
 ##########################################################################################################################################################
-# Description: This is a PyTorch implementation of DCGAN (https://arxiv.org/abs/1511.06434) for MNIST, CIFAR10 and custom datasets taken from PyTorch tutorials and will be format for future models.
+# Description: This is a PyTorch implementation of improved WGAN (https://arxiv.org/abs/1704.00028) for MNIST, CIFAR10 and custom datasets taken from PyTorch tutorials and will be format for future models.
 # The model is sensitive to hyperparameters and may not converge for most values.
 
 # Here MNIST and CIFAR10 datasets are rescaled to 64x64x1 and 64*64x3 respectively thus increasing the number of parameters in the model with no real benefit.
