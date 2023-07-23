@@ -181,6 +181,8 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
 
                 optimizerC.step()
 
+                loss_c_batch += errC.item()
+
                 for para in netC.parameters():
                     para.data.clamp_(-WEIGHT_CLIP, WEIGHT_CLIP)
 

@@ -23,7 +23,7 @@ import torch.utils.data
 
 import torchvision.utils as vutils
 
-from utils import *
+from utils import get_device, get_loader, weights_init, save_plot_gan, gradient_penalty
 from model import Generator, Critic
 ##########################################################################################################################################################
 # Arguments
@@ -42,7 +42,7 @@ parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ncf', type=int, default=64)
 
 parser.add_argument('--niter', type=int, default=20, help='number of epochs to train for')
-parser.add_argument('--lr', type=float, default=1e-3, help='learning rate, default=0.0001')
+parser.add_argument('--lr', type=float, default=1e-4, help='learning rate, default=0.0001')
 parser.add_argument('--beta1', type=float, default=0, help='beta1 for adam. default=0')
 parser.add_argument('--beta2', type=float, default=0.9, help='beta2 for adam. default=0.9')
 parser.add_argument('--critic_iter', type=int, default=5, help='critic iteration, default=5')
@@ -189,6 +189,8 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
 
                 errC = errC_real + errC_fake + errC_gp
                 errC.backward(retain_graph=True)
+
+                loss_c_batch += errC.item()
 
                 optimizerC.step()
 
