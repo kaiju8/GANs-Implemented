@@ -24,7 +24,7 @@ import torch.utils.data
 
 import torchvision.utils as vutils
 
-from utils import *
+from utils import get_device, get_loader, save_plot_gan, weights_init
 from model import Generator, Discriminator
 
 ##########################################################################################################################################################
@@ -42,6 +42,8 @@ parser.add_argument('--channels', type=int, default=3, help='number of input cha
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
+
+parser.add_argument('--soften', action='store_true', default=False, help='enables soften labels')
 
 parser.add_argument('--niter', type=int, default=20, help='number of epochs to train for')
 parser.add_argument('--lr', type=float, default=2e-4, help='learning rate, default=0.0002')
@@ -61,7 +63,7 @@ parser.add_argument('--outf', default='./output', help='folder to output images 
 args = parser.parse_args()
 print(args)
 
-MODEL_NAME = 'dcgan'
+MODEL_NAME, _ = os.path.splitext(os.path.basename(os.path.realpath(__file__)))
 
 ##########################################################################################################################################################
 # Set random seed for reproducibility
@@ -129,6 +131,13 @@ print(netD)
 ##########################################################################################################################################################
 # Loss function and optimizer
 
+real_label = 1
+fake_label = 0
+
+if args.soften:
+    real_label = 0.9
+    fake_label = 0.1
+
 criterion = nn.BCELoss()
 
 fixed_noise = torch.randn(args.batchSize, Z_DIM, 1, 1, device=DEVICE)
@@ -166,7 +175,7 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
             batch_size = real.size(0)
 
             output = netD(real)
-            errD_real = criterion(output, torch.ones_like(output))
+            errD_real = criterion(output, real_label*torch.ones_like(output))
             D_x = output.mean().item()
 
             # train with fake
@@ -174,7 +183,7 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
             fake = netG(noise)
 
             output = netD(fake.detach())
-            errD_fake = criterion(output, torch.zeros_like(output))
+            errD_fake = criterion(output, fake_label*torch.ones_like(output))
             D_G_z1 = output.mean().item()
 
             errD = (errD_real + errD_fake)/2
@@ -232,8 +241,9 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
         losses_g.append(loss_g)
 
         # do checkpointing
-        torch.save(netG.state_dict(), '%s/netG.pth' % (output_dir))
-        torch.save(netD.state_dict(), '%s/netD.pth' % (output_dir))
+        if epoch % 5 == 0:
+            torch.save(netG.state_dict(), '%s/netG_epoch_%03d.pth' % (output_dir,epoch))
+            torch.save(netD.state_dict(), '%s/netD_epoch_%03d.pth' % (output_dir,epoch))
 
 ##########################################################################################################################################################
 # Plot losses

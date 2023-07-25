@@ -38,8 +38,12 @@ parser.add_argument('--imageSize', type=int, default=64, help='the height / widt
 parser.add_argument('--channels', type=int, default=3, help='number of input channels')
 
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
+parser.add_argument('--embedding_dim', type=int, default=20, help='size of the embedding vector')
 parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ncf', type=int, default=64)
+
+parser.add_argument('--conditional', action='store_true', help='use conditional GAN')
+parser.add_argument('--num_classes', type=int, default=2, help='number of classes for conditional GAN')
 
 parser.add_argument('--niter', type=int, default=20, help='number of epochs to train for')
 parser.add_argument('--lr', type=float, default=1e-4, help='learning rate, default=0.0001')
@@ -61,7 +65,7 @@ parser.add_argument('--outf', default='./output', help='folder to output images 
 args = parser.parse_args()
 print(args)
 
-MODEL_NAME = 'wgan_gp'
+MODEL_NAME, _ = os.path.splitext(os.path.basename(os.path.realpath(__file__)))
 
 ##########################################################################################################################################################
 # Set random seed for reproducibility
@@ -75,6 +79,8 @@ torch.manual_seed(args.manualSeed)
 ##########################################################################################################################################################
 # Create output directory
 output_dir = str(args.outf + '/' + MODEL_NAME + '/' + args.dataset)
+if args.conditional:
+    output_dir = str(args.outf + '/' + MODEL_NAME + '/' + args.dataset + '_conditional')
 try:
     os.makedirs(output_dir)
 except OSError:
@@ -93,12 +99,18 @@ BATCH_SIZE = int(args.batchSize)
 IMAGE_DIM = args.imageSize
 CHANNELS_DIM = args.channels
 
+NUM_CLASSES = int(args.num_classes)
+
 if str(args.dataset).lower() == 'mnist':
     CHANNELS_DIM = 1
+    NUM_CLASSES = 10
+
 elif str(args.dataset).lower() == 'cifar10':
     CHANNELS_DIM = 3
+    NUM_CLASSES = 10
 
 Z_DIM = int(args.nz)
+EMBEDDING_DIM = int(args.embedding_dim)
 NGF = int(args.ngf)
 NCF = int(args.ncf)
 
@@ -117,13 +129,13 @@ DATALOADER = get_loader(args, IMAGE_DIM, CHANNELS_DIM, BATCH_SIZE)
 ##########################################################################################################################################################
 # Networks
 
-netG = Generator(NGF, Z_DIM, CHANNELS_DIM).to(DEVICE)
+netG = Generator(NGF, Z_DIM, CHANNELS_DIM, args.conditional, NUM_CLASSES, IMAGE_DIM, EMBEDDING_DIM).to(DEVICE)
 netG.apply(weights_init)
 if args.netG != '':
     netG.load_state_dict(torch.load(args.netG))
 print(netG)
 
-netC = Critic(NCF, CHANNELS_DIM, instance_norm=True).to(DEVICE)
+netC = Critic(NCF, CHANNELS_DIM, args.conditional, NUM_CLASSES, IMAGE_DIM, instance_norm=True).to(DEVICE)
 netC.apply(weights_init)
 if args.netC != '':
     netC.load_state_dict(torch.load(args.netC))
@@ -135,6 +147,8 @@ print(netC)
 #criterion = nn.BCELoss()
 
 fixed_noise = torch.randn(args.batchSize, Z_DIM, 1, 1, device=DEVICE)
+if args.conditional:
+    fixed_labels = torch.randint(0, NUM_CLASSES, (args.batchSize,), device=DEVICE)
 
 optimizerC = optim.Adam(netC.parameters(), lr=LEARNING_RATE, betas=(BETA1, BETA2))
 optimizerG = optim.Adam(netG.parameters(), lr=LEARNING_RATE, betas=(BETA1, BETA2))
@@ -166,49 +180,86 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
             for _ in range(CRITIC_ITER):
                 # train with real
                 netC.zero_grad()
+                errC_real = 0.0
+                
+                if args.conditional:
+                    real, labels = data[0].to(DEVICE), data[1].to(DEVICE)
+                    batch_size = real.size(0)
 
-                real = data[0].to(DEVICE)
-                batch_size = real.size(0)
+                    output = netC(real, labels)
+                    errC_real = -output.mean()
 
-                output = netC(real)
-                errC_real = -output.mean()
+                    noise = torch.randn(batch_size, Z_DIM, 1, 1, device=DEVICE)
+                    fake = netG(noise, labels)
 
-                # train with fake
-                noise = torch.randn(batch_size, Z_DIM, 1, 1, device=DEVICE)
-                fake = netG(noise)
+                    output = netC(fake.detach(), labels)
+                    errC_fake = output.mean()
 
-                output = netC(fake.detach())
-                errC_fake = output.mean()
-
-                # gradient penalty
-                epsilon = torch.rand(batch_size, 1, 1, 1, device=DEVICE)
-                x_hat = (epsilon * real.data + (1 - epsilon) * fake.data).requires_grad_(True)
-                output = netC(x_hat)
-                errC_gp = LAMBDA*gradient_penalty(output, x_hat, DEVICE)
+                    epsilon = torch.rand(batch_size, 1, 1, 1, device=DEVICE)
+                    x_hat = (epsilon * real.data + (1 - epsilon) * fake.data).requires_grad_(True)
+                    output = netC(x_hat, labels)
+                    errC_gp = LAMBDA*gradient_penalty(output, x_hat, DEVICE)
 
 
-                errC = errC_real + errC_fake + errC_gp
-                errC.backward(retain_graph=True)
+                    errC = errC_real + errC_fake + errC_gp
+                    errC.backward(retain_graph=True)
 
-                loss_c_batch += errC.item()
+                    optimizerC.step()
 
-                optimizerC.step()
+                    loss_c_batch += errC.item()
+
+                else:
+                    real = data[0].to(DEVICE)
+                    batch_size = real.size(0)
+
+                    output = netC(real)
+                    errC_real = -output.mean()
+
+                    noise = torch.randn(batch_size, Z_DIM, 1, 1, device=DEVICE)
+                    fake = netG(noise)
+
+                    output = netC(fake.detach())
+                    errC_fake = output.mean()
+
+                    epsilon = torch.rand(batch_size, 1, 1, 1, device=DEVICE)
+                    x_hat = (epsilon * real.data + (1 - epsilon) * fake.data).requires_grad_(True)
+                    output = netC(x_hat)
+                    errC_gp = LAMBDA*gradient_penalty(output, x_hat, DEVICE)
+
+
+                    errC = errC_real + errC_fake + errC_gp
+                    errC.backward(retain_graph=True)
+
+                    optimizerC.step()
+
+                    loss_c_batch += errC.item()
 
             loss_c_batch/=CRITIC_ITER
 
             ############################
             # (2) Update G network: minimize E(-C(G(z)))
             ###########################
+            if args.conditional:
+                netG.zero_grad()
 
-            netG.zero_grad()
+                output = netC(fake, labels)
+                errG = -output.mean()
+                errG.backward(retain_graph=True)
 
-            output = netC(fake)
-            errG = -output.mean()
-            errG.backward(retain_graph=True)
+                optimizerG.step()
 
-            optimizerG.step()
+                loss_g_batch += errG.item()
 
-            loss_g_batch += errG.item()
+            else :
+                netG.zero_grad()
+
+                output = netC(fake)
+                errG = -output.mean()
+                errG.backward(retain_graph=True)
+
+                optimizerG.step()
+
+                loss_g_batch += errG.item()
 
 
             # Interpolate between two points in latent space
@@ -221,13 +272,26 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
             #interpolated_images = netG(interpolation)
 
             if i % 100 == 0:
-                vutils.save_image(real.detach(),
-                        '%s/real_samples.png' % output_dir,
+                if args.conditional:
+                    vutils.save_image(real.detach(),
+                        '%s/real_samples_epoch_%03d.png' % (output_dir, epoch),
                         normalize=True)
-                fake = netG(fixed_noise)
-                vutils.save_image(fake.detach(),
-                        '%s/fake_samples_epoch_%03d.png' % (output_dir, epoch),
-                        normalize=True)
+                    fake = netG(fixed_noise, labels)
+                    vutils.save_image(fake.detach(),
+                            '%s/fake_samples_epoch_%03d.png' % (output_dir, epoch),
+                            normalize=True)
+                    fixed_fake = netG(fixed_noise, fixed_labels)
+                    vutils.save_image(fixed_fake.detach(),
+                            '%s/fixed_fake_samples_epoch_%03d.png' % (output_dir, epoch),
+                            normalize=True)
+                else:
+                    vutils.save_image(real.detach(),
+                            '%s/real_samples.png' % (output_dir),
+                            normalize=True)
+                    fake = netG(fixed_noise)
+                    vutils.save_image(fake.detach(),
+                            '%s/fake_samples_epoch_%03d.png' % (output_dir, epoch),
+                            normalize=True)
                 #vutils.save_image(interpolated_images.detach(),
                 #       '%s/interpolated_samples_epoch_%03d.png' % (str(args.outf + '/' + args.dataset), epoch),
                 #       normalize=True)
@@ -245,8 +309,9 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
         losses_g.append(loss_g)
 
         # do checkpointing
-        torch.save(netG.state_dict(), '%s/netG.pth' % (output_dir))
-        torch.save(netC.state_dict(), '%s/netC.pth' % (output_dir))
+        if epoch % 5 == 0:
+            torch.save(netG.state_dict(), '%s/netG_epoch_%03d.pth' % (output_dir,epoch))
+            torch.save(netC.state_dict(), '%s/netC_epoch_%03d.pth' % (output_dir,epoch))
 
 ##########################################################################################################################################################
 # Plot losses

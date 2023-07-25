@@ -1,9 +1,13 @@
-import torch.nn as nn
+import torch
+from torch import nn
+import torch.nn.functional as F
+
 
 class Generator(nn.Module):
-    def __init__(self, ngf , z_dim, channels_dim, batch_norm=True):
+    def __init__(self, ngf , z_dim, channels_dim, conditional, num_classes, image_dim, embed_length, batch_norm=True):
         super(Generator, self).__init__()
-
+        if conditional:
+            z_dim += embed_length
         self.gen = nn.Sequential(
             # input is Z, going into a convolution
             self.block(z_dim, ngf * 8, kernel_size=4, stride=1, padding=0, batch_norm=batch_norm),
@@ -18,8 +22,14 @@ class Generator(nn.Module):
             nn.Tanh()
             # state size. (channels_dim) x 64 x 64
         )
+        if conditional:
+            self.embed = nn.Embedding(num_classes, embed_length)
+        
 
-    def forward(self, input):
+    def forward(self, input, labels=None):
+        if labels is not None:
+            labels = self.embed(labels).unsqueeze(2).unsqueeze(3)
+            input = torch.cat((input, labels), dim=1)
         output = self.gen(input)
         return output
     
@@ -32,9 +42,10 @@ class Generator(nn.Module):
         return nn.Sequential(*layers)
     
 class Discriminator(nn.Module):
-    def __init__(self, ndf, channels_dim, batch_norm=True):
+    def __init__(self, ndf, channels_dim, conditional, num_classes, image_dim, batch_norm=True):
         super(Discriminator, self).__init__()
-
+        if conditional:
+            channels_dim += 1
         self.disc = nn.Sequential(
             # input is (channels_dim) x 64 x 64
             self.block(channels_dim, ndf, batch_norm=False),
@@ -48,10 +59,14 @@ class Discriminator(nn.Module):
             nn.Conv2d(ndf * 8, 1, kernel_size=4, stride=1, padding=0, bias=False),
             nn.Sigmoid()
         )
+        if conditional:
+            self.embed = nn.Embedding(num_classes, image_dim*image_dim)
 
-    def forward(self, input):
-
-        output = self.disc(input)
+    def forward(self, input, labels=None):
+        if labels is not None:
+            labels = self.embed(labels).view(labels.size(0), 1, input.size(2), input.size(3))
+            input = torch.cat((input, labels), dim=1)
+        output = self.critic(input)
         return output.view(-1, 1).squeeze(1)
     
     def block(self, in_channels, out_channels, kernel_size=4, stride=2, padding=1, batch_norm=True, relu=True):
@@ -63,9 +78,10 @@ class Discriminator(nn.Module):
         return nn.Sequential(*layers)
     
 class Critic(nn.Module):
-    def __init__(self, ncf , channels_dim, instance_norm=False, relu=True):
+    def __init__(self, ncf , channels_dim, conditional, num_classes, image_dim, instance_norm=False, relu=True):
         super(Critic, self).__init__()
-
+        if conditional:
+            channels_dim += 1
         self.critic = nn.Sequential(
             # input is (channels_dim) x 64 x 64
             nn.Conv2d(channels_dim, ncf, kernel_size=4, stride=2, padding=1, bias=False),
@@ -80,8 +96,14 @@ class Critic(nn.Module):
             nn.Conv2d(ncf * 8, 1, kernel_size=4, stride=1, padding=0, bias=False),
             # No Sigmod here
         )
+        if conditional:
+            self.embed = nn.Embedding(num_classes, image_dim*image_dim)
 
-    def forward(self, input):
+
+    def forward(self, input, labels=None):
+        if labels is not None:
+            labels = self.embed(labels).view(labels.size(0), 1, input.size(2), input.size(3))
+            input = torch.cat((input, labels), dim=1)
         output = self.critic(input)
         return output.view(-1, 1).squeeze(1)
     
@@ -94,3 +116,40 @@ class Critic(nn.Module):
         if relu:
             layers.append(nn.LeakyReLU(0.2, inplace=True))
         return nn.Sequential(*layers)
+    
+class VAE(nn.Module):
+    def __init__(self, input_dim, z_dim=100, h_dim=2000):
+        super().__init__()
+        self.img2hid = nn.Linear(input_dim, h_dim)
+        self.hid2mu = nn.Linear(h_dim, z_dim)
+        self.hid2sigma = nn.Linear(h_dim, z_dim)
+        
+        self.z2hid = nn.Linear(z_dim, h_dim)
+        self.hid2img = nn.Linear(h_dim, input_dim)
+        
+    def encode(self, x):
+        h = F.relu(self.img2hid(x))
+        mu, sigma = self.hid2mu(h), self.hid2sigma(h)
+        
+        return mu, sigma
+    
+    def reparametrize(self, mu, sigma):
+        std = torch.exp(sigma/2)
+        eps = torch.randn_like(std)
+        
+        return mu + eps*std
+
+    
+    def decode(self, z):
+        h_ = self.z2hid(z)
+        x_ = torch.sigmoid(self.hid2img(h_))
+        
+        return x_
+    
+    def forward(self, x):
+        mu, sigma = self.encode(x)
+        
+        z_ = self.reparametrize(mu, sigma)
+        x_ = self.decode(z_)
+        
+        return x_, mu, sigma
