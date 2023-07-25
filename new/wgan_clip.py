@@ -144,7 +144,8 @@ print(netC)
 
 fixed_noise = torch.randn(args.batchSize, Z_DIM, 1, 1, device=DEVICE)
 if args.conditional:
-    fixed_labels = torch.randint(0, NUM_CLASSES, (args.batchSize,), device=DEVICE)
+    cond_noise = torch.randn(NUM_CLASSES*4, Z_DIM, 1, 1, device=DEVICE)
+    cond_labels = torch.range(0, NUM_CLASSES-1, dtype=torch.long).repeat(4).to(DEVICE)
 
 optimizerC = optim.RMSprop(netC.parameters(), lr=LEARNING_RATE)
 optimizerG = optim.RMSprop(netG.parameters(), lr=LEARNING_RATE)
@@ -269,9 +270,9 @@ for epoch in trange(args.niter, unit='epoch', desc='Training'):
                     vutils.save_image(fake.detach(),
                             '%s/fake_samples_epoch_%03d.png' % (output_dir, epoch),
                             normalize=True)
-                    fixed_fake = netG(fixed_noise, fixed_labels)
-                    vutils.save_image(fixed_fake.detach(),
-                            '%s/fixed_fake_samples_epoch_%03d.png' % (output_dir, epoch),
+                    cond_fake = netG(cond_noise, cond_labels)
+                    vutils.save_image(cond_fake.detach(),
+                            '%s/cond_fake_samples_epoch_%03d.png' % (output_dir, epoch),
                             normalize=True)
                 else:
                     vutils.save_image(real.detach(),
